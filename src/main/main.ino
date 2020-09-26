@@ -1,6 +1,6 @@
 
 /*
- * 	STM32F103C8
+ * 	STM32F103C8 platformio
  * 	The circuit:
  * 	RFM69 attached to SPI_2 Softeare SPI bo HW SPI nie działa jescze
  * 	CS    <-->  PB12 <-->  BOARD_SPI2_NSS_PIN
