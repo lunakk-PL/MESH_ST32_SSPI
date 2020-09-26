@@ -20,14 +20,20 @@
 
 /* Included librarys*/
 #include <Arduino.h>
+#include "SPI.h"
 #include <RHMesh.h>
 #include <RH_RF69.h>
 #include <RHSoftwareSPI.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
+// #include <OneWire.h>
+// #include <DallasTemperature.h>
 #include <avdweb_VirtualDelay.h>
-#include <libmaple/iwdg.h>
+//#include <libmaple/iwdg.h>
+// #include <IWatchdog.h>
 #include <ledIndicator.h>
+
+
+
+
 
 /*
  *
@@ -82,16 +88,16 @@ uint8_t message[26];
  *
  */
 
-/*utworzenie  instancji OneWire do komunikaci*/
-OneWire *oneWire[sizeof(oneWirePins) / sizeof(uint8_t)];
-/*przekzanie referencji OneWire do DallasTemperaturte*/
-DallasTemperature *sensors[sizeof(oneWirePins) / sizeof(uint8_t)];
-/*tablica do obsługi wartości  adresów DS18b20*/
-uint8_t dsAddress[sizeof(oneWirePins) / sizeof(uint8_t)][8];
-/*tablica dla obsługi watrość odczytów temperatur*/
-int16_t tempReadings[sizeof(oneWirePins) / sizeof(uint8_t)];
-/*rozdzielczość dla DS18b20 12 bit*/
-uint8_t tempRes = 12;
+// /*utworzenie  instancji OneWire do komunikaci*/
+// OneWire *oneWire[sizeof(oneWirePins) / sizeof(uint8_t)];
+// /*przekzanie referencji OneWire do DallasTemperaturte*/
+// DallasTemperature *sensors[sizeof(oneWirePins) / sizeof(uint8_t)];
+// /*tablica do obsługi wartości  adresów DS18b20*/
+// uint8_t dsAddress[sizeof(oneWirePins) / sizeof(uint8_t)][8];
+// /*tablica dla obsługi watrość odczytów temperatur*/
+// int16_t tempReadings[sizeof(oneWirePins) / sizeof(uint8_t)];
+// /*rozdzielczość dla DS18b20 12 bit*/
+// uint8_t tempRes = 12;
 
 /*
  *
@@ -99,8 +105,8 @@ uint8_t tempRes = 12;
  *
  */
 
-uint16_t tmpPressValues[2][19]; // !!! nieparzyste wartości kolumnach !!! = ilość odczytów podczas cyklu
-uint16_t pressureValues[2];
+int16_t tmpPressValues[2][19]; // !!! nieparzyste wartości kolumnach !!! = ilość odczytów podczas cyklu
+int16_t pressureValues[2];
 uint32_t delayTimer = 20;
 uint8_t counterReadPressure = 0;
 uint32_t presentTime;
@@ -163,24 +169,24 @@ void radioModuleStart()
 	Serial.println("DONE");
 }
 
-/*Konfiguracja modułu odczytu temperatury*/
-void tempModuleStart()
-{
+// /*Konfiguracja modułu odczytu temperatury*/
+// void tempModuleStart()
+// {
 
-	Serial.print(">>> Temperature Module Starting... ");
-	///search each bus one by one
-	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
-	{
-		oneWire[i] = new OneWire(oneWirePins[i]);
-		sensors[i] = new DallasTemperature(oneWire[i]);
-		sensors[i]->begin();
-		sensors[i]->setResolution(tempRes);
-		sensors[i]->setWaitForConversion(false);
-		sensors[i]->getAddress(dsAddress[i], 0);
-		sensors[i]->requestTemperatures();
-	}
-	Serial.println("DONE");
-}
+// 	Serial.print(">>> Temperature Module Starting... ");
+// 	///search each bus one by one
+// 	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
+// 	{
+// 		oneWire[i] = new OneWire(oneWirePins[i]);
+// 		sensors[i] = new DallasTemperature(oneWire[i]);
+// 		sensors[i]->begin();
+// 		sensors[i]->setResolution(tempRes);
+// 		sensors[i]->setWaitForConversion(false);
+// 		sensors[i]->getAddress(dsAddress[i], 0);
+// 		sensors[i]->requestTemperatures();
+// 	}
+// 	Serial.println("DONE");
+// }
 
 /*Wyszukiwanie numeru pozycji w tabeli po wartości*/
 uint8_t findIndex(const uint8_t a[], uint8_t size, uint8_t value)
@@ -248,64 +254,64 @@ void getIrmsValues()
 	Serial.println("DONE");
 }
 
-void reqTempConv()
-{
+// void reqTempConv()
+// {
 
-	Serial.print(">>> Requesting temperature conversion... ");
-	/// poll devices connect to the bus
-	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
-	{
-		sensors[i]->requestTemperatures();
-	}
-	Serial.println("DONE");
-}
+// 	Serial.print(">>> Requesting temperature conversion... ");
+// 	/// poll devices connect to the bus
+// 	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
+// 	{
+// 		sensors[i]->requestTemperatures();
+// 	}
+// 	Serial.println("DONE");
+// }
 
-void getTempValues()
-{
+// void getTempValues()
+// {
 
-	Serial.print(">>> Requesting temperature values... ");
-	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
-	{
-		tempReadings[i] = (sensors[i]->getTempC(dsAddress[i])) * 100;
-	}
-	Serial.println("DONE");
-}
+// 	Serial.print(">>> Requesting temperature values... ");
+// 	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
+// 	{
+// 		tempReadings[i] = (sensors[i]->getTempC(dsAddress[i])) * 100;
+// 	}
+// 	Serial.println("DONE");
+// }
 
-void printReadings()
-{
+// void printReadings()
+// {
 
-	Serial.println();
-	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
-	{
-		Serial.print(">>> Sensor ");
-		Serial.print(i + 1);
-		Serial.print(" Temp: ");
-		Serial.print((float)tempReadings[i] / 100, 2);
-		Serial.println(" *C");
-	}
+// 	Serial.println();
+// 	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
+// 	{
+// 		Serial.print(">>> Sensor ");
+// 		Serial.print(i + 1);
+// 		Serial.print(" Temp: ");
+// 		Serial.print((float)tempReadings[i] / 100, 2);
+// 		Serial.println(" *C");
+// 	}
 
-	Serial.print(">>> HP");
-	Serial.print(" ADC Value: ");
-	Serial.println(pressureValues[0]);
-	Serial.print(">>> LP");
-	Serial.print(" ADC Value: ");
-	Serial.println(pressureValues[1]);
+// 	Serial.print(">>> HP");
+// 	Serial.print(" ADC Value: ");
+// 	Serial.println(pressureValues[0]);
+// 	Serial.print(">>> LP");
+// 	Serial.print(" ADC Value: ");
+// 	Serial.println(pressureValues[1]);
 
-	for (uint8_t i = 0;
-		 i < sizeof(irmsMedianValues) / sizeof(irmsMedianValues[0]); i++)
-	{
-		Serial.print(">>> L");
-		Serial.print(i + 1);
-		Serial.print(" ADC Value: ");
-		Serial.println(irmsMedianValues[i]);
-	}
-	Serial.println();
-}
+// 	for (uint8_t i = 0;
+// 		 i < sizeof(irmsMedianValues) / sizeof(irmsMedianValues[0]); i++)
+// 	{
+// 		Serial.print(">>> L");
+// 		Serial.print(i + 1);
+// 		Serial.print(" ADC Value: ");
+// 		Serial.println(irmsMedianValues[i]);
+// 	}
+// 	Serial.println();
+// }
 
 void clearArrays()
 {
 
-	memset(tempReadings, -127, sizeof(tempReadings));
+	// memset(tempReadings, -127, sizeof(tempReadings));
 	memset(irmsMedianValues, -1, sizeof(irmsMedianValues));
 }
 
@@ -363,12 +369,12 @@ void messageConstructor()
 		radioModuleTemp,
 		pressureValues[0],
 		pressureValues[1],
-		tempReadings[0],
-		tempReadings[1],
-		tempReadings[2],
-		tempReadings[3],
-		tempReadings[4],
-		tempReadings[5],
+		// tempReadings[0],
+		// tempReadings[1],
+		// tempReadings[2],
+		// tempReadings[3],
+		// tempReadings[4],
+		// tempReadings[5],
 		irmsMedianValues[0],
 		irmsMedianValues[1],
 		irmsMedianValues[2],
@@ -473,7 +479,8 @@ void readPressure(uint8_t pinHP, uint8_t pinLP, uint32_t readInterval)
 void setup()
 {
 	/* IWDG init  t_IWDG = 19.2s */
-	iwdg_init(IWDG_PRE_256, 3000);
+	// iwdg_init(IWDG_PRE_256, 3000);
+	// IWatchdog.begin(4000000); // ok 4s
 
 	/* 	czekaj na serial lub timeout 5s*/
 	Serial.begin(115200);
@@ -496,7 +503,7 @@ void setup()
 	radioModuleStart();
 
 	/*Start modułu OneWire*/
-	tempModuleStart();
+	// tempModuleStart();
 
 	/*Sets pinMode as a analog input*/
 	pinMode(PA7, INPUT_ANALOG);
@@ -530,21 +537,21 @@ void loop()
 
 	if (delay1.elapsed())
 	{
-		reqTempConv();
+		// reqTempConv();
 		counterReadPressure = 0;
 		delay2.start(500);
 	}
 
 	if (delay2.elapsed())
 	{
-		getTempValues();
+		// getTempValues();
 		getIrmsValues();
 		delay3.start(1000);
 	}
 
 	if (delay3.elapsed())
 	{
-		printReadings();
+		// printReadings();
 		messageConstructor();
 		sendMessage();
 		clearArrays();
@@ -552,5 +559,7 @@ void loop()
 	}
 
 	radioModuleWatchdog();
-	iwdg_feed();
+	// iwdg_feed();
+	// IWatchdog.reload();
 }
+
