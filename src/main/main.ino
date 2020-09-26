@@ -37,13 +37,10 @@
 
 /*miso, mosi, sck, nss, irq, reset*/
 const uint8_t radioPins[] = {PB14, PB15, PB13, PB12, PA8, PA9};
-
 /*OneWire pins*/
 const uint8_t oneWirePins[] = {PA10, PB9, PB8, PB7, PB6, PB11};
-
 /*ADC pins HP, LP, dla pomiaru ciśnienia*/
 const uint8_t adcPinsPress[] = {PB1, PB0};
-
 /*ADC pins  L1, L2, L3 dla pomiaru prądu*/
 const uint8_t adcPinsCurr[] = {PA7, PA6, PA5};
 
