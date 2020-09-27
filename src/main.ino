@@ -12,28 +12,20 @@
  *
  * 	RadioHead w wersji 1.112
  * 	SPI w wersji 1.0
- * 	QuickMedianLib w wersji 1.1.1
- * 	OneWire w wersji 2.3.5
+ * 	OneWireSTM
  * 	DallasTemperature w wersji 3.8.0
  *
  */
 
 /* Included librarys*/
 #include <Arduino.h>
-#include "SPI.h"
 #include <RHMesh.h>
 #include <RH_RF69.h>
 #include <RHSoftwareSPI.h>
-// #include <OneWire.h>
-// #include <DallasTemperature.h>
 #include <avdweb_VirtualDelay.h>
-//#include <libmaple/iwdg.h>
-// #include <IWatchdog.h>
+#include <libmaple/iwdg.h>
+#include <DallasTemperature.h>
 #include <ledIndicator.h>
-
-
-
-
 
 /*
  *
@@ -74,9 +66,6 @@ RHMesh manager(rf69, CLIENT_ADDRESS);
 const uint8_t syncwords[] = {0x2d, 0xd5};
 /*bufor dla widomości odebranych*/
 uint8_t buf[RH_RF69_MAX_MESSAGE_LEN];
-/* watchdog dl RFM69 jeżeli send message nie ustawi true wtedy funcka radioModuleWatchdog wzwoli reset radia*/
-bool rfWd = true;
-uint16_t previousMillis = 0;
 /*zmienne dodatkowe*/
 int8_t rssi;
 uint8_t radioModuleTemp;
@@ -89,15 +78,15 @@ uint8_t message[26];
  */
 
 // /*utworzenie  instancji OneWire do komunikaci*/
-// OneWire *oneWire[sizeof(oneWirePins) / sizeof(uint8_t)];
+OneWire *oneWire[sizeof(oneWirePins) / sizeof(uint8_t)];
 // /*przekzanie referencji OneWire do DallasTemperaturte*/
-// DallasTemperature *sensors[sizeof(oneWirePins) / sizeof(uint8_t)];
+DallasTemperature *sensors[sizeof(oneWirePins) / sizeof(uint8_t)];
 // /*tablica do obsługi wartości  adresów DS18b20*/
-// uint8_t dsAddress[sizeof(oneWirePins) / sizeof(uint8_t)][8];
+uint8_t dsAddress[sizeof(oneWirePins) / sizeof(uint8_t)][8];
 // /*tablica dla obsługi watrość odczytów temperatur*/
-// int16_t tempReadings[sizeof(oneWirePins) / sizeof(uint8_t)];
+int16_t tempReadings[6]; //6 czujników 6 odczytów
 // /*rozdzielczość dla DS18b20 12 bit*/
-// uint8_t tempRes = 12;
+uint8_t tempRes = 12;
 
 /*
  *
@@ -107,14 +96,19 @@ uint8_t message[26];
 
 int16_t tmpPressValues[2][19]; // !!! nieparzyste wartości kolumnach !!! = ilość odczytów podczas cyklu
 int16_t pressureValues[2];
-uint32_t delayTimer = 20;
+uint32_t delayTimerPressure = 0;
 uint8_t counterReadPressure = 0;
-uint32_t presentTime;
 
-/*L1, L2, L3 ADC Config*/
+/*
+ *
+ * L1 L2 L3 ADC Config
+ *
+ */
 
-/*tablica z wynikami odczytów dla L1 L2 L3*/
-int16_t irmsMedianValues[3];
+int16_t tmpIrmsValues[3][101]; // !!! nieparzyste wartości kolumnach !!! = ilość odczytów podczas cyklu
+int16_t irsmValues[3];
+uint32_t delayTimerIrms = 0;
+uint8_t counterReadIrms = 0;
 
 /*
  *
@@ -169,24 +163,24 @@ void radioModuleStart()
 	Serial.println("DONE");
 }
 
-// /*Konfiguracja modułu odczytu temperatury*/
-// void tempModuleStart()
-// {
+/*Konfiguracja modułu odczytu temperatury*/
+void tempModuleStart()
+{
 
-// 	Serial.print(">>> Temperature Module Starting... ");
-// 	///search each bus one by one
-// 	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
-// 	{
-// 		oneWire[i] = new OneWire(oneWirePins[i]);
-// 		sensors[i] = new DallasTemperature(oneWire[i]);
-// 		sensors[i]->begin();
-// 		sensors[i]->setResolution(tempRes);
-// 		sensors[i]->setWaitForConversion(false);
-// 		sensors[i]->getAddress(dsAddress[i], 0);
-// 		sensors[i]->requestTemperatures();
-// 	}
-// 	Serial.println("DONE");
-// }
+	Serial.print(">>> Temperature Module Starting... ");
+	///search each bus one by one
+	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
+	{
+		oneWire[i] = new OneWire(oneWirePins[i]);
+		sensors[i] = new DallasTemperature(oneWire[i]);
+		sensors[i]->begin();
+		sensors[i]->setResolution(tempRes);
+		sensors[i]->setWaitForConversion(false);
+		sensors[i]->getAddress(dsAddress[i], 0);
+		sensors[i]->requestTemperatures();
+	}
+	Serial.println("DONE");
+}
 
 /*Wyszukiwanie numeru pozycji w tabeli po wartości*/
 uint8_t findIndex(const uint8_t a[], uint8_t size, uint8_t value)
@@ -198,121 +192,67 @@ uint8_t findIndex(const uint8_t a[], uint8_t size, uint8_t value)
 	return (index == size ? -1 : index);
 }
 
-/*Funcka zwraca wartość odcztyu ADC z CT  delay(1) dla  freq=50hz*/
-uint16_t getIrms(uint8_t cTpin)
+void reqTempConv()
 {
 
-	uint16_t b;
-	uint16_t readings[100];
-	for (int i = 0; i < 100; ++i)
+	Serial.print(">>> Requesting temperature conversion... ");
+	/// poll devices connect to the bus
+	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
 	{
-		readings[i] = analogRead(cTpin);
-		delay(1);
-
-		uint16_t first, second, third;
-		third = first = second = 0;
-
-		for (int i = 0; i < 100; i++)
-		{
-			/* If current element is greater than first*/
-			if (readings[i] > first)
-			{
-				third = second;
-				second = first;
-				first = readings[i];
-			}
-
-			/* If arr[i] is in between first and second then update second  */
-			else if (readings[i] > second)
-			{
-				third = second;
-				second = readings[i];
-			}
-
-			else if (readings[i] > third)
-				third = readings[i];
-		}
-		b = (first + second + third) / 3;
-
-		/*	if (b < 50) {
-		 b = 0;
-		 }*/
+		sensors[i]->requestTemperatures();
 	}
-	return (b);
-}
-
-/*Funcja zapisule wartości odcztów z ADC dla faz L1 L2 L3*/
-void getIrmsValues()
-{
-
-	Serial.print(">>> Requesting L1 L2 L3 I values... ");
-
-	irmsMedianValues[0] = (getIrms(PA7));
-	irmsMedianValues[1] = (getIrms(PA6));
-	irmsMedianValues[2] = (getIrms(PA5));
-
 	Serial.println("DONE");
 }
 
-// void reqTempConv()
-// {
+void getTempValues()
+{
 
-// 	Serial.print(">>> Requesting temperature conversion... ");
-// 	/// poll devices connect to the bus
-// 	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
-// 	{
-// 		sensors[i]->requestTemperatures();
-// 	}
-// 	Serial.println("DONE");
-// }
+	Serial.print(">>> Requesting temperature values... ");
+	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
+	{
+		tempReadings[i] = (sensors[i]->getTempC(dsAddress[i])) * 100;
+	}
+	Serial.println("DONE");
+}
 
-// void getTempValues()
-// {
+void printReadings()
+{
 
-// 	Serial.print(">>> Requesting temperature values... ");
-// 	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
-// 	{
-// 		tempReadings[i] = (sensors[i]->getTempC(dsAddress[i])) * 100;
-// 	}
-// 	Serial.println("DONE");
-// }
+	Serial.println();
+	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
+	{
+		Serial.print(">>> Sensor ");
+		Serial.print(i + 1);
+		Serial.print(" Temp: ");
+		Serial.print((float)tempReadings[i] / 100, 2);
+		Serial.println(" *C");
+	}
 
-// void printReadings()
-// {
+	Serial.print(">>> HP");
+	Serial.print(" ADC Value: ");
+	Serial.println(pressureValues[0]);
+	Serial.print(">>> LP");
+	Serial.print(" ADC Value: ");
+	Serial.println(pressureValues[1]);
 
-// 	Serial.println();
-// 	for (uint8_t i = 0; i < sizeof(oneWirePins) / sizeof(uint8_t); i++)
-// 	{
-// 		Serial.print(">>> Sensor ");
-// 		Serial.print(i + 1);
-// 		Serial.print(" Temp: ");
-// 		Serial.print((float)tempReadings[i] / 100, 2);
-// 		Serial.println(" *C");
-// 	}
-
-// 	Serial.print(">>> HP");
-// 	Serial.print(" ADC Value: ");
-// 	Serial.println(pressureValues[0]);
-// 	Serial.print(">>> LP");
-// 	Serial.print(" ADC Value: ");
-// 	Serial.println(pressureValues[1]);
-
-// 	for (uint8_t i = 0;
-// 		 i < sizeof(irmsMedianValues) / sizeof(irmsMedianValues[0]); i++)
-// 	{
-// 		Serial.print(">>> L");
-// 		Serial.print(i + 1);
-// 		Serial.print(" ADC Value: ");
-// 		Serial.println(irmsMedianValues[i]);
-// 	}
-// 	Serial.println();
-// }
+	for (uint8_t i = 0;
+		 i < sizeof(irsmValues) / sizeof(irsmValues[0]); i++)
+	{
+		Serial.print(">>> L");
+		Serial.print(i + 1);
+		Serial.print(" ADC Value: ");
+		Serial.println(irsmValues[i]);
+	}
+	Serial.println();
+}
 
 void clearArrays()
 {
-
-	// memset(tempReadings, -127, sizeof(tempReadings));
-	memset(irmsMedianValues, -1, sizeof(irmsMedianValues));
+	memset(pressureValues, 0, sizeof(pressureValues));
+	memset(tmpPressValues, 0, sizeof(tmpPressValues));
+	memset(irsmValues, 0, sizeof(irsmValues));
+	memset(tmpIrmsValues, 0, sizeof(tmpIrmsValues));
+	memset(tempReadings, -127, sizeof(tempReadings));
 }
 
 void meshRepeterFeture()
@@ -326,9 +266,7 @@ void meshRepeterFeture()
 void sendMessage()
 {
 
-	rfWd = false;
-	if (manager.sendtoWait((uint8_t *)message, sizeof(message),
-						   SERVER_ADDRESS) == RH_ROUTER_ERROR_NONE)
+	if (manager.sendtoWait((uint8_t *)message, sizeof(message), SERVER_ADDRESS) == RH_ROUTER_ERROR_NONE)
 	{
 		Serial.print(">>> Sending data via RF Link... ");
 		uint8_t len = sizeof(buf);
@@ -338,7 +276,7 @@ void sendMessage()
 		if (manager.recvfromAckTimeout(buf, &len, 3000, &from))
 		{
 			blink(30, 150); // wyzwolenie blinkania ledem
-			rfWd = true;	// reset Watchdoga radia
+			iwdg_feed();	// reset Watchdoga
 			Serial.println("ACK OK");
 			Serial.print(">>> GW ID: ");
 			Serial.print(from, DEC);
@@ -355,7 +293,7 @@ void sendMessage()
 	}
 	else
 	{
-		Serial.print("No reply, is Server: ");
+		Serial.print("No reply, is GW: ");
 		Serial.print(SERVER_ADDRESS);
 		Serial.println(" Online?");
 	}
@@ -363,22 +301,20 @@ void sendMessage()
 
 void messageConstructor()
 {
-
 	int16_t messagePrototype[] = {
 		rssi,
 		radioModuleTemp,
 		pressureValues[0],
 		pressureValues[1],
-		// tempReadings[0],
-		// tempReadings[1],
-		// tempReadings[2],
-		// tempReadings[3],
-		// tempReadings[4],
-		// tempReadings[5],
-		irmsMedianValues[0],
-		irmsMedianValues[1],
-		irmsMedianValues[2],
-
+		tempReadings[0],
+		tempReadings[1],
+		tempReadings[2],
+		tempReadings[3],
+		tempReadings[4],
+		tempReadings[5],
+		irsmValues[0],
+		irsmValues[1],
+		irsmValues[2],
 	};
 
 	uint8_t *ptr = (uint8_t *)&messagePrototype; //cast the 16bit pointer to an 8bit pointer
@@ -389,38 +325,24 @@ void messageConstructor()
 	}
 }
 
-/* funkcja wyzwala reset modułu radiowego*/
-void radioModuleWatchdog(void)
-{
-
-	uint16_t currentMillis = millis();
-	if (currentMillis - previousMillis > 10000)
-	{
-		previousMillis = currentMillis;
-		if (rfWd == false)
-		{
-			radioModuleReset(PA6);
-			rfWd = true;
-		}
-	}
-}
 /*
 Wyliczenie mediany z odczytów z ADC dla ciśnień HP i LP
 */
 void readPressure(uint8_t pinHP, uint8_t pinLP, uint32_t readInterval)
 {
+
 	uint8_t readCount = sizeof(tmpPressValues[0]) / sizeof(tmpPressValues[0][0]);
 	uint16_t first, second, third;
-	presentTime = millis();
-	if ((millis() - delayTimer > readInterval) && counterReadPressure < readCount)
+	if ((millis() - delayTimerPressure > readInterval) && counterReadPressure < readCount)
 	{
-		delayTimer = millis();
+		
+		delayTimerPressure = millis();
 		tmpPressValues[0][counterReadPressure] = analogRead(pinHP);
 		tmpPressValues[1][counterReadPressure] = analogRead(pinLP);
 		++counterReadPressure;
 
 		if (counterReadPressure == readCount)
-		{
+		{	Serial.print(">>> Requesting pressure values... ");
 			uint8_t i, j;
 			uint16_t a;
 			for (i = 0; i < readCount; ++i)
@@ -452,7 +374,7 @@ void readPressure(uint8_t pinHP, uint8_t pinLP, uint32_t readInterval)
 			third = second + 1;
 			pressureValues[0] = (tmpPressValues[0][first] + tmpPressValues[0][second] + tmpPressValues[0][third]) / 3;
 			pressureValues[1] = (tmpPressValues[1][first] + tmpPressValues[1][second] + tmpPressValues[1][third]) / 3;
-
+			Serial.println(" DONE ");
 			/* 	for (i = 0; i < readCount; ++i)
 			{
 				Serial.print(tmpPressValues[0][i]);
@@ -472,6 +394,102 @@ void readPressure(uint8_t pinHP, uint8_t pinLP, uint32_t readInterval)
 }
 
 /*
+Wyliczenie Irms z odczytów z ADC dla ciśnień L1 L2 L3
+*/
+void readIrms(uint8_t pinL1, uint8_t pinL2, uint8_t pinL3)
+{
+	uint8_t readCount = sizeof(tmpIrmsValues[0]) / sizeof(tmpIrmsValues[0][0]);
+	if ((micros() - delayTimerIrms > 1000) && counterReadIrms < readCount) // 1ms odstęp między odczytami
+	{
+		
+		delayTimerIrms = micros();
+		tmpIrmsValues[0][counterReadIrms] = analogRead(pinL1);
+		tmpIrmsValues[1][counterReadIrms] = analogRead(pinL2);
+		tmpIrmsValues[2][counterReadIrms] = analogRead(pinL3);
+
+		++counterReadIrms;
+
+		if (counterReadIrms == readCount)
+		{	Serial.print(">>> Requesting IRMS values... ");
+			uint16_t first, second, third;
+			third = first = second = 0;
+
+			for (int i = 0; i < readCount; i++)
+			{
+				/* If current element is greater than first*/
+				if (tmpIrmsValues[0][i] > first)
+				{
+					third = second;
+					second = first;
+					first = tmpIrmsValues[0][i];
+				}
+				/* If arr[i] is in between first and second then update second  */
+				else if (tmpIrmsValues[0][i] > second)
+				{
+					third = second;
+					second = tmpIrmsValues[0][i];
+				}
+				else if (tmpIrmsValues[0][i] > third)
+					third = tmpIrmsValues[0][i];
+			}
+			irsmValues[0] = (first + second + third) / 3;
+			third = first = second = 0;
+
+			for (int i = 0; i < readCount; i++)
+			{
+				/* If current element is greater than first*/
+				if (tmpIrmsValues[1][i] > first)
+				{
+					third = second;
+					second = first;
+					first = tmpIrmsValues[1][i];
+				}
+				/* If arr[i] is in between first and second then update second  */
+				else if (tmpIrmsValues[1][i] > second)
+				{
+					third = second;
+					second = tmpIrmsValues[1][i];
+				}
+				else if (tmpIrmsValues[1][i] > third)
+					third = tmpIrmsValues[1][i];
+			}
+			irsmValues[1] = (first + second + third) / 3;
+			third = first = second = 0;
+
+			for (int i = 0; i < readCount; i++)
+			{
+				/* If current element is greater than first*/
+				if (tmpIrmsValues[2][i] > first)
+				{
+					third = second;
+					second = first;
+					first = tmpIrmsValues[2][i];
+				}
+				/* If arr[i] is in between first and second then update second  */
+				else if (tmpIrmsValues[2][i] > second)
+				{
+					third = second;
+					second = tmpIrmsValues[2][i];
+				}
+				else if (tmpIrmsValues[2][i] > third)
+					third = tmpIrmsValues[2][i];
+			}
+			irsmValues[2] = (first + second + third) / 3;
+			third = first = second = 0;
+			Serial.println(" DONE ");
+			/*   
+		Serial.print(">>> L1 ");
+    	Serial.println(irsmValues[0]);
+    	Serial.print(">>> L2 ");
+    	Serial.println(irsmValues[1]);
+    	Serial.print(">>> L3 ");
+    	Serial.println(irsmValues[2]);
+	   */
+		}
+	}
+}
+
+/*
  *
  * Setup
  *
@@ -479,8 +497,7 @@ void readPressure(uint8_t pinHP, uint8_t pinLP, uint32_t readInterval)
 void setup()
 {
 	/* IWDG init  t_IWDG = 19.2s */
-	// iwdg_init(IWDG_PRE_256, 3000);
-	// IWatchdog.begin(4000000); // ok 4s
+	iwdg_init(IWDG_PRE_256, 4090);
 
 	/* 	czekaj na serial lub timeout 5s*/
 	Serial.begin(115200);
@@ -503,7 +520,7 @@ void setup()
 	radioModuleStart();
 
 	/*Start modułu OneWire*/
-	// tempModuleStart();
+	tempModuleStart();
 
 	/*Sets pinMode as a analog input*/
 	pinMode(PA7, INPUT_ANALOG);
@@ -515,7 +532,7 @@ void setup()
 
 	/*ustawienie zawartości tablicy*/
 	memset(pressureValues, 0, sizeof(pressureValues));
-	memset(irmsMedianValues, -1, sizeof(irmsMedianValues));
+	// memset(irmsMedianValues, -1, sizeof(irmsMedianValues));
 	Serial.println(">>> Falling into main loop >>>");
 	Serial.println();
 }
@@ -530,6 +547,7 @@ void loop()
 	meshRepeterFeture();
 	led();
 	readPressure(PB0, PB1, 10);
+	readIrms(PA5, PA6, PA7);
 
 	/*MAIN FUNCIONS TIMERS*/
 	/*first timer delay  musi być, breaks the deadlock*/
@@ -537,29 +555,24 @@ void loop()
 
 	if (delay1.elapsed())
 	{
-		// reqTempConv();
-		counterReadPressure = 0;
+		reqTempConv();
 		delay2.start(500);
 	}
 
 	if (delay2.elapsed())
 	{
-		// getTempValues();
-		getIrmsValues();
+		counterReadPressure = 0;
+		counterReadIrms = 0;
+		getTempValues();
 		delay3.start(1000);
 	}
 
 	if (delay3.elapsed())
 	{
-		// printReadings();
+		printReadings();
 		messageConstructor();
 		sendMessage();
 		clearArrays();
 		delay1.start(1000);
 	}
-
-	radioModuleWatchdog();
-	// iwdg_feed();
-	// IWatchdog.reload();
 }
-
