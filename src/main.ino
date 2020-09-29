@@ -27,6 +27,7 @@
 #include <DallasTemperature.h>
 #include <ledIndicator.h>
 
+
 /*
  *
  * Pinout Config
@@ -49,7 +50,7 @@ const uint8_t adcPinsCurr[] = {PA7, PA6, PA5};
  */
 
 /*adres tego nodea*/
-#define CLIENT_ADDRESS 102
+#define CLIENT_ADDRESS 101
 /*adres gatewaya*/
 #define SERVER_ADDRESS 001
 /*częstotoliwośc pracy yyy.yyy Mhz*/
@@ -59,7 +60,7 @@ const uint8_t adcPinsCurr[] = {PA7, PA6, PA5};
 /*softwarespi uzywam bo HW_SPI2 dla STM32 nie jest jeszcze zaimplementowan*/
 RHSoftwareSPI softwarespi;
 /*piny (nss, irq) dla radia*/
-RH_RF69 rf69(radioPins[3], radioPins[4], softwarespi);
+RH_RF69 rf69(PB12, PA8, softwarespi);
 /*mesh manager*/
 RHMesh manager(rf69, CLIENT_ADDRESS);
 /*Własne ID sieci, muisi być takie samo dla wszystkich urzadzeń*/
@@ -276,7 +277,7 @@ void sendMessage()
 		if (manager.recvfromAckTimeout(buf, &len, 3000, &from))
 		{
 			blink(30, 150); // wyzwolenie blinkania ledem
-			iwdg_feed();	// reset Watchdoga
+			// iwdg_feed();	// reset Watchdoga
 			Serial.println("ACK OK");
 			Serial.print(">>> GW ID: ");
 			Serial.print(from, DEC);
@@ -497,7 +498,7 @@ void readIrms(uint8_t pinL1, uint8_t pinL2, uint8_t pinL3)
 void setup()
 {
 	/* IWDG init  t_IWDG = 19.2s */
-	iwdg_init(IWDG_PRE_256, 4090);
+	// iwdg_init(IWDG_PRE_256, 4090);
 
 	/* 	czekaj na serial lub timeout 5s*/
 	Serial.begin(115200);
@@ -544,7 +545,10 @@ void setup()
 void loop()
 {
 	/*Funckej w  CONT.LOOP!*/
-	meshRepeterFeture();
+	// meshRepeterFeture();
+	uint8_t len = sizeof(buf);
+	uint8_t from;
+	manager.recvfromAck(buf, &len, &from);
 	led();
 	readPressure(PB0, PB1, 10);
 	readIrms(PA5, PA6, PA7);
@@ -573,6 +577,6 @@ void loop()
 		messageConstructor();
 		sendMessage();
 		clearArrays();
-		delay1.start(1000);
+		delay1.start(8500);
 	}
 }
